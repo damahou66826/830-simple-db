@@ -1,5 +1,7 @@
 package simpledb.storage;
 
+import simpledb.common.Type;
+
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -102,7 +104,21 @@ public class Tuple implements Serializable {
      */
     public String toString() {
         // some code goes here
-        throw new UnsupportedOperationException("Implement this");
+        //throw new UnsupportedOperationException("Implement this");
+        Iterator<Field> target = fields();
+        String resu = "";
+        while(target.hasNext()){
+            Field temp = target.next();
+            if(temp.getType().equals(Type.INT_TYPE)){
+                //temp = (IntField) temp;
+                resu += ((IntField) temp).getValue();
+            }else{
+                //temp = (StringField) temp;
+                resu += ((StringField) temp).getValue();
+            }
+            resu += "  ";
+        }
+        return resu;
     }
 
     /**
