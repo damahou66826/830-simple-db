@@ -49,7 +49,7 @@ public class HeapPage implements Page {
         this.pid = id;
         this.td = Database.getCatalog().getTupleDesc(id.getTableId());
         this.numSlots = getNumTuples();
-        System.out.println("该heapPage中槽的总数为" + numSlots);
+        //System.out.println("该heapPage中槽的总数为" + numSlots);
         DataInputStream dis = new DataInputStream(new ByteArrayInputStream(data));
 
         // allocate and read the header slots of this page
@@ -316,7 +316,7 @@ public class HeapPage implements Page {
     /**
      * Returns true if associated slot on this page is filled.
      *11-8
-     * 这个地方有问题
+     *
      */
     public boolean isSlotUsed(int i) {
         // some code goes here

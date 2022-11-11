@@ -33,13 +33,17 @@ public class HeapFile implements DbFile {
 
         Iterator<Tuple> it = null;
         // 临时迭代器存储构造方法传过来的iterator
-        Iterator<Tuple> temp = null;
+        //Iterator<Tuple> temp = null;
+        private List<Tuple> temp;
         final TransactionId tid;
         private Tuple next = null;
 
         public heapPageIterator(TransactionId tid,Iterator<Tuple> it) {
             this.tid = tid;
-            this.temp = it;
+            this.temp = new ArrayList<>();
+            while(it.hasNext()){
+                this.temp.add(it.next());
+            }
         }
 
         public boolean hasNext(){
@@ -70,7 +74,7 @@ public class HeapFile implements DbFile {
 
         @Override
         public void open() throws DbException, TransactionAbortedException {
-            this.it = temp;
+            this.it = temp.iterator();
         }
 
         @Override
@@ -91,6 +95,7 @@ public class HeapFile implements DbFile {
     private File f;
     private TupleDesc td;
     private DataInputStream dataInputStream;
+    private List<byte[]> allPageData;
     /**
      * Constructs a heap file backed by the specified file.
      * 
@@ -102,8 +107,23 @@ public class HeapFile implements DbFile {
         // some code goes here
         this.f = f;
         this.td = td;
+        this.allPageData = new ArrayList<>();
+        /**
+         * 将所有字节流烤出
+         */
         try {
             this.dataInputStream = new DataInputStream(new FileInputStream(f));
+            int pageSize = BufferPool.getPageSize();
+            byte[] pageData = new byte[pageSize];
+            while(true){
+                try {
+                    int flag = this.dataInputStream.read(pageData,0,pageSize);
+                    allPageData.add(pageData.clone());
+                    if(flag == -1) break;
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
         } catch (FileNotFoundException e) {
             e.printStackTrace();
         }
@@ -151,21 +171,27 @@ public class HeapFile implements DbFile {
         /**
          * 这个地方应当将f字节流存储起来，如果过大 应当分页存取，再返回对应字符页面
          */
-
-
         // 用输入流来读取文件，读取内容为一页内容， 具体对应的pageNum的内容
         //首先得到对应的pageNum
         int pageNum = pid.getPageNumber();
-        int pageSize = BufferPool.getPageSize();
-        byte[] pageData = new byte[pageSize];
+//        int pageSize = BufferPool.getPageSize();
+//        byte[] pageData = new byte[pageSize];
+//        try {
+//            // !!!! 防止最后一页指针越界  加入Math.min（） 来进行规整  (去文档查read的参数作用)
+//            //System.out.println(f.length()-pageSize*pageNum + "   pageSize = " +pageSize);
+//            // 这个地方有问题
+//            dataInputStream.read(pageData,0, (int) Math.min(pageSize,(f.length()-pageSize*pageNum)));
+//            Page target = new HeapPage((HeapPageId) pid,pageData);
+//            return target;
+//        } catch (FileNotFoundException e) {
+//            e.printStackTrace();
+//        } catch (IOException e) {
+//            e.printStackTrace();
+//        }
+        byte[] targetPageData = allPageData.get(pageNum);
         try {
-            // !!!! 防止最后一页指针越界  加入Math.min（） 来进行规整  (去文档查read的参数作用)
-            //System.out.println(f.length()-pageSize*pageNum + "   pageSize = " +pageSize);
-            dataInputStream.read(pageData,0, (int) Math.min(pageSize,(f.length()-pageSize*pageNum)));
-            Page target = new HeapPage((HeapPageId) pid,pageData);
-            return target;
-        } catch (FileNotFoundException e) {
-            e.printStackTrace();
+            Page targetPage = new HeapPage((HeapPageId) pid,targetPageData);
+            return targetPage;
         } catch (IOException e) {
             e.printStackTrace();
         }
@@ -185,7 +211,7 @@ public class HeapFile implements DbFile {
         // some code goes here
         // 文件大小除以每个页面大小 往上取整
         int pageSize = BufferPool.getPageSize();
-        return (int) Math.ceil((int)f.length() / pageSize);
+        return (int) Math.ceil((double) f.length() / pageSize);
     }
 
     // see DbFile.java for javadocs

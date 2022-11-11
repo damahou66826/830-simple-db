@@ -48,10 +48,11 @@ public class SeqScan implements OpIterator {
      */
     public SeqScan(TransactionId tid, int tableid, String tableAlias) {
         // some code goes here
-        dbFileIterator = null;
+        //dbFileIterator = null;
         transactionId = tid;
         this.tableAlias = tableAlias == "" ? "null" : tableAlias;   //空字符串替换为null
         dbFile = Database.getCatalog().getDatabaseFile(tableid);
+        dbFileIterator = dbFile.iterator(this.transactionId);
     }
 
     /**
@@ -98,7 +99,7 @@ public class SeqScan implements OpIterator {
     public void open() throws DbException, TransactionAbortedException {
         // some code goes here
         // 给创建的迭代器初始化
-        dbFileIterator = dbFile.iterator(this.transactionId);
+        dbFileIterator.open();
     }
 
     /**
@@ -155,7 +156,6 @@ public class SeqScan implements OpIterator {
     public void rewind() throws DbException, NoSuchElementException,
             TransactionAbortedException {
         // some code goes here
-        dbFileIterator.close();
-        dbFileIterator.open();
+        dbFileIterator.rewind();
     }
 }

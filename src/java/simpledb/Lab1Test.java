@@ -17,6 +17,9 @@ public class Lab1Test {
         // create the table, associate it with some_data_file.dat
         // and tell the catalog about the schema of this table.
         HeapFile table1 = new HeapFile(new File("some_data.dat"), descriptor);
+        /**
+         * 测试一下tuple
+         */
         Database.getCatalog().addTable(table1, "test");
 
         // construct the query: we use a simple SeqScan, which spoonfeeds
@@ -27,8 +30,9 @@ public class Lab1Test {
         try {
             // and run it
             f.open();
-            System.out.println("===");
+            //System.out.println("===");
             while (f.hasNext()) {
+                //System.out.println("===");
                 Tuple tup = f.next();
                 System.out.println(tup.toString());
             }
