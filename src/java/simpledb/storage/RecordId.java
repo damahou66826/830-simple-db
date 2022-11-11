@@ -53,7 +53,8 @@ public class RecordId implements Serializable {
     @Override
     public boolean equals(Object o) {
         // some code goes here
-        if(o == null || !o.getClass().equals(RecordId.class)) return false;
+        //if(o == null || !o.getClass().equals(RecordId.class)) return false;
+        if( o instanceof RecordId == false) return false;
         RecordId recordId = (RecordId) o;
         return recordId.pageId.equals(this.pageId) && recordId.tupleno == this.tupleno;
         //throw new UnsupportedOperationException("implement this");

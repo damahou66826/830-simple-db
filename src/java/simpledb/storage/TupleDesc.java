@@ -212,7 +212,8 @@ public class TupleDesc implements Serializable {
         if( o == null) return false;
 
         //.equals() with the wrong type should return false
-        if(! o.getClass().equals(TupleDesc.class)) return  false;
+        //if(! o.getClass().equals(TupleDesc.class)) return  false;
+        if( o instanceof TupleDesc == false) return false;
 
         TupleDesc testOne = (TupleDesc) o;
         if(testOne.tdItems.size() != this.tdItems.size()) return false;
