@@ -1,6 +1,7 @@
 package simpledb.execution;
 
 import simpledb.common.DbException;
+import simpledb.common.Type;
 import simpledb.storage.Tuple;
 import simpledb.storage.TupleDesc;
 import simpledb.transaction.TransactionAbortedException;
@@ -17,6 +18,21 @@ public class Aggregate extends Operator {
 
     private static final long serialVersionUID = 1L;
 
+    private final TupleDesc theStartTupleDesc;
+
+    /**
+     * 聚合后的opIterator
+     */
+    private OpIterator opIerator;
+
+    private final int afiled;
+
+    private final int gfield;
+
+    private final Aggregator.Op aop;
+
+    private OpIterator[] opIterators;
+
     /**
      * Constructor.
      * <p>
@@ -32,7 +48,64 @@ public class Aggregate extends Operator {
      */
     public Aggregate(OpIterator child, int afield, int gfield, Aggregator.Op aop) {
         // some code goes here
+        this.afiled = afield;
+        this.gfield = gfield;
+        this.aop = aop;
+        this.opIterators = null;
+        this.opIerator = child;
+        this.theStartTupleDesc = child.getTupleDesc();
+        init();
     }
+
+
+    public void init(){
+        /**
+         * 对传进来的child分情况进行处理
+         */
+        Type tempType = this.opIerator.getTupleDesc().getFieldType(aggregateField());
+        OpIterator tempOp = this.opIerator;
+        if(tempType == Type.INT_TYPE){
+            /**
+             * 用IntegerAggregator处理
+             */
+            IntegerAggregator integerAggregator = new IntegerAggregator(this.gfield,this.opIerator.getTupleDesc().getFieldType(gfield),this.afiled,this.aop);
+            try {
+                tempOp.open();
+                while (tempOp.hasNext()){
+                    integerAggregator.mergeTupleIntoGroup(tempOp.next());
+                }
+            } catch (DbException e) {
+                e.printStackTrace();
+            } catch (TransactionAbortedException e) {
+                e.printStackTrace();
+            }finally {
+                tempOp.close();
+            }
+            this.opIerator = integerAggregator.iterator();
+
+        }else{
+            /**
+             * 用StringAggregator处理
+             */
+            StringAggregator stringAggregator = new StringAggregator(this.gfield,this.opIerator.getTupleDesc().getFieldType(gfield),this.afiled,this.aop);
+            try {
+                tempOp.open();
+                while (tempOp.hasNext()){
+                    stringAggregator.mergeTupleIntoGroup(tempOp.next());
+                }
+            }catch (DbException e) {
+                e.printStackTrace();
+            } catch (TransactionAbortedException e) {
+                e.printStackTrace();
+            }finally {
+                tempOp.close();
+            }
+            this.opIerator = stringAggregator.iterator();
+        }
+    }
+
+
+
 
     /**
      * @return If this aggregate is accompanied by a groupby, return the groupby
@@ -41,7 +114,8 @@ public class Aggregate extends Operator {
      */
     public int groupField() {
         // some code goes here
-        return -1;
+        if(this.gfield == -1) return Aggregator.NO_GROUPING;
+        return this.gfield;
     }
 
     /**
@@ -51,7 +125,8 @@ public class Aggregate extends Operator {
      */
     public String groupFieldName() {
         // some code goes here
-        return null;
+        if(this.gfield == -1) return null;
+        return this.theStartTupleDesc.getFieldName(gfield);
     }
 
     /**
@@ -59,7 +134,7 @@ public class Aggregate extends Operator {
      */
     public int aggregateField() {
         // some code goes here
-        return -1;
+        return this.afiled;
     }
 
     /**
@@ -68,7 +143,7 @@ public class Aggregate extends Operator {
      */
     public String aggregateFieldName() {
         // some code goes here
-        return null;
+        return this.theStartTupleDesc.getFieldName(this.afiled);
     }
 
     /**
@@ -76,7 +151,7 @@ public class Aggregate extends Operator {
      */
     public Aggregator.Op aggregateOp() {
         // some code goes here
-        return null;
+        return this.aop;
     }
 
     public static String nameOfAggregatorOp(Aggregator.Op aop) {
@@ -86,6 +161,8 @@ public class Aggregate extends Operator {
     public void open() throws NoSuchElementException, DbException,
             TransactionAbortedException {
         // some code goes here
+        super.open();
+        this.opIerator.open();
     }
 
     /**
@@ -97,11 +174,16 @@ public class Aggregate extends Operator {
      */
     protected Tuple fetchNext() throws TransactionAbortedException, DbException {
         // some code goes here
+        if(this.opIerator == null) return null;
+        if(this.opIerator.hasNext())
+            return this.opIerator.next();
         return null;
     }
 
     public void rewind() throws DbException, TransactionAbortedException {
         // some code goes here
+        close();
+        open();
     }
 
     /**
@@ -117,22 +199,44 @@ public class Aggregate extends Operator {
      */
     public TupleDesc getTupleDesc() {
         // some code goes here
-        return null;
+        Type[] types;
+        String[] strings;
+        int index = 0;
+        if(gfield != -1){
+            //说明有分组
+            types = new Type[2];
+            strings = new String[2];
+            types[0] = this.theStartTupleDesc.getFieldType(this.gfield);
+            strings[0] = groupFieldName();
+            index++;
+        }else{
+            types = new Type[1];
+            strings = new String[1];
+        }
+        types[index] = Type.INT_TYPE;
+        strings[index] = this.aop + String.format("(%s)", aggregateFieldName());
+        /**
+         * 测试用例里面跟这里说的不一样 T_T
+         */
+        return new TupleDesc(types);
     }
 
     public void close() {
         // some code goes here
+        super.close();
+        this.opIerator.close();
     }
 
     @Override
     public OpIterator[] getChildren() {
         // some code goes here
-        return null;
+        return this.opIterators;
     }
 
     @Override
     public void setChildren(OpIterator[] children) {
         // some code goes here
+        this.opIterators = null;
     }
 
 }

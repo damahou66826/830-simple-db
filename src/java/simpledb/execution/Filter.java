@@ -14,6 +14,12 @@ public class Filter extends Operator {
 
     private static final long serialVersionUID = 1L;
 
+    private final Predicate p;
+
+    private final OpIterator child;
+
+    private OpIterator[] childs;
+
     /**
      * Constructor accepts a predicate to apply and a child operator to read
      * tuples to filter from.
@@ -25,29 +31,43 @@ public class Filter extends Operator {
      */
     public Filter(Predicate p, OpIterator child) {
         // some code goes here
+        this.p = p;
+        this.child = child;
+        childs = null;
     }
 
     public Predicate getPredicate() {
         // some code goes here
-        return null;
+        return this.p;
     }
 
     public TupleDesc getTupleDesc() {
         // some code goes here
-        return null;
+        return child.getTupleDesc();
     }
 
     public void open() throws DbException, NoSuchElementException,
             TransactionAbortedException {
         // some code goes here
+        super.open();
+        this.child.open();
     }
 
     public void close() {
         // some code goes here
+        super.close();
+        this.child.close();
     }
 
     public void rewind() throws DbException, TransactionAbortedException {
         // some code goes here
+        /**
+         * 有点问题
+         */
+        close();
+        this.child.rewind();
+        open();
+
     }
 
     /**
@@ -62,18 +82,24 @@ public class Filter extends Operator {
     protected Tuple fetchNext() throws NoSuchElementException,
             TransactionAbortedException, DbException {
         // some code goes here
+        if(this.child == null) return null;
+        if(this.child.hasNext()){
+            Tuple temp = this.child.next();
+            return p.filter(temp) ? temp : fetchNext();
+        }
         return null;
     }
 
     @Override
     public OpIterator[] getChildren() {
         // some code goes here
-        return null;
+        return this.childs;
     }
 
     @Override
     public void setChildren(OpIterator[] children) {
         // some code goes here
+        this.childs = children;
     }
 
 }

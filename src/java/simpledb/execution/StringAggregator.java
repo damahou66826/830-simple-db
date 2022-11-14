@@ -1,7 +1,12 @@
 package simpledb.execution;
 
 import simpledb.common.Type;
+import simpledb.storage.IntField;
 import simpledb.storage.Tuple;
+import simpledb.storage.TupleIterator;
+import simpledb.utils.twoTuple;
+
+import java.util.*;
 
 /**
  * Knows how to compute some aggregate over a set of StringFields.
@@ -9,6 +14,16 @@ import simpledb.storage.Tuple;
 public class StringAggregator implements Aggregator {
 
     private static final long serialVersionUID = 1L;
+
+    private final int gbfield;
+
+    private final Type gbFieldType;
+
+    private final int aField;
+
+    private final Op op;
+
+    private Map<Integer, twoTuple> map;
 
     /**
      * Aggregate constructor
@@ -21,6 +36,12 @@ public class StringAggregator implements Aggregator {
 
     public StringAggregator(int gbfield, Type gbfieldtype, int afield, Op what) {
         // some code goes here
+        if(what != Op.COUNT) throw new IllegalArgumentException();
+        this.aField = afield;
+        this.gbfield = gbfield;
+        this.gbFieldType = gbfieldtype;
+        this.op = what;
+        map = new HashMap<>();
     }
 
     /**
@@ -29,6 +50,21 @@ public class StringAggregator implements Aggregator {
      */
     public void mergeTupleIntoGroup(Tuple tup) {
         // some code goes here
+        int tempValue;
+        if(this.gbFieldType == null){
+            tempValue = -10000;
+        }else{
+            tempValue = tup.getField(gbfield).hashCode();
+        }
+        if(map.isEmpty() || !map.containsKey(tempValue)){
+            map.put(tempValue,new twoTuple(this.gbFieldType));
+            if(this.gbFieldType != null){
+                map.get(tempValue).setField(0,tup.getField(this.gbfield));
+            }
+        }
+
+        twoTuple temp = map.get(tempValue);
+        temp.setCount();
     }
 
     /**
@@ -41,7 +77,21 @@ public class StringAggregator implements Aggregator {
      */
     public OpIterator iterator() {
         // some code goes here
-        throw new UnsupportedOperationException("please implement me for lab2");
+        List<Tuple> target;
+        //对于上面所计算的内容进行一个整合操作
+        if(this.gbFieldType == null) {
+            twoTuple targetTuple = map.get(-10000);
+            targetTuple.setField(0, new IntField(targetTuple.getCount()));
+            target = new ArrayList<>(Arrays.asList(targetTuple));
+        }else{
+            target = new ArrayList<>();
+            for(Map.Entry<Integer,twoTuple> item : map.entrySet()){
+                twoTuple targetTuple = item.getValue();
+                targetTuple.setField(1,new IntField(targetTuple.getCount()));
+                target.add(targetTuple);
+            }
+        }
+        return new TupleIterator(target.get(0).getTupleDesc(),target);
     }
 
 }

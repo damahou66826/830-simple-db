@@ -13,7 +13,7 @@ public class TupleDesc implements Serializable {
     /**
      * @@自己
      */
-    private List<TDItem> tdItems;
+    public List<TDItem> tdItems;
 
     /**
      * A help class to facilitate organizing the information of each field
@@ -182,17 +182,30 @@ public class TupleDesc implements Serializable {
         Type[] newType = new Type[size];
         String[] newString = new String[size];
         int index = 0;
+        List<String> judgeName = new ArrayList<>();
+        boolean flag = true;
         for(TDItem tdItem : td1.tdItems){
             newType[index] = tdItem.fieldType;
             newString[index] = tdItem.fieldName;
+            if(flag && judgeName.contains(tdItem.fieldName)) flag = false;
+            else if(flag){
+                judgeName.add(tdItem.fieldName);
+            }
             index++;
         }
         for(TDItem tdItem : td2.tdItems){
             newType[index] = tdItem.fieldType;
             newString[index] = tdItem.fieldName;
+            if(flag && judgeName.contains(tdItem.fieldName)) flag = false;
+            else if(flag){
+                judgeName.add(tdItem.fieldName);
+            }
             index++;
         }
-        return new TupleDesc(newType,newString);
+        //判断是否有重复列名，如果有重复，则改为默认列名设置
+        if(flag) return new TupleDesc(newType,newString);
+        else return new TupleDesc(newType);
+
     }
 
     /**
