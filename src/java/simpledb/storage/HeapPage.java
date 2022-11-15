@@ -20,11 +20,17 @@ import java.util.stream.Stream;
  */
 public class HeapPage implements Page {
 
+
+    private TransactionId dirtyTrans;
+
     final HeapPageId pid;
     final TupleDesc td;
     final byte[] header;
     final Tuple[] tuples;
     final int numSlots;
+
+    //记录当前页面中Tuple的数量
+    public int curTupleNum;
 
     byte[] oldData;
     private final Byte oldDataLock= (byte) 0;
@@ -46,6 +52,13 @@ public class HeapPage implements Page {
      * @see BufferPool#getPageSize()
      */
     public HeapPage(HeapPageId id, byte[] data) throws IOException {
+        /**
+         * 构造方法中初始构造页认为页面没有脏
+         */
+        this.dirtyTrans = null;
+
+
+        this.curTupleNum = 0;
         this.pid = id;
         this.td = Database.getCatalog().getTupleDesc(id.getTableId());
         this.numSlots = getNumTuples();
@@ -56,14 +69,17 @@ public class HeapPage implements Page {
         header = new byte[getHeaderSize()];
         for (int i=0; i<header.length; i++){
             header[i] = dis.readByte();
-            //System.out.println("header[i] = "+ (byte)header[i]);
         }
         
         tuples = new Tuple[numSlots];
         try{
             // allocate and read the actual records of this page
-            for (int i=0; i<tuples.length; i++)
+            for (int i=0; i<tuples.length; i++){
                 tuples[i] = readNextTuple(dis,i);
+                if(isSlotUsed(i)){
+                    this.curTupleNum++;
+                }
+            }
         }catch(NoSuchElementException e){
             e.printStackTrace();
         }
@@ -78,7 +94,7 @@ public class HeapPage implements Page {
     private int getNumTuples() {        
         // some code goes here
         // td.getSize() 没有× 8 导致我停留了好久
-        return (int) Math.floor((BufferPool.getPageSize() * 8) / (double)(td.getSize() * 8 + 1));
+        return (BufferPool.getPageSize() * 8) / (this.td.getSize() * 8 + 1);
 
     }
 
@@ -91,7 +107,11 @@ public class HeapPage implements Page {
         // some code goes here
         //是一个位图,记录每一个tuple
         //System.out.println((int) Math.ceil((double) this.numSlots / 8));
-        return (int) Math.ceil((double) this.numSlots / 8);
+        if(this.numSlots % 8 == 0){
+            return this.numSlots / 8;
+        }else{
+            return this.numSlots / 8 + 1;
+        }
                  
     }
     
@@ -258,16 +278,18 @@ public class HeapPage implements Page {
      */
     public void deleteTuple(Tuple t) throws DbException {
         // some code goes here
-        if(numSlots == 0) throw  new DbException("tuple slot is already empty");
-        for(int i = 0; i < tuples.length; i++){
-            Tuple tu = tuples[i];
-            if(tu.equals(t)){
-                tuples[i] = null;
-
-            }
-        }
-        throw  new DbException("this tuple is not on this page");
         // not necessary for lab1
+        RecordId rid = t.getRecordId();
+        PageId pageId = rid.getPageId();
+        int slot = rid.getTupleNumber();
+
+        if (pageId.equals(this.pid) == false)
+            throw new DbException("Tuple it not on this page");
+        if (this.isSlotUsed(slot) == false)
+            throw new DbException("Tuple slot is already empty");
+
+        this.markSlotUsed(slot, false);
+        this.curTupleNum --;
     }
 
     /**
@@ -280,6 +302,22 @@ public class HeapPage implements Page {
     public void insertTuple(Tuple t) throws DbException {
         // some code goes here
         // not necessary for lab1
+        // 如果这个页没有空的tuple 或者 这个页的tupledesc与传进来的t不匹配，抛出异常
+        if(!t.getTupleDesc().equals(this.td) || this.curTupleNum == this.numSlots){
+            throw new DbException("page is full (no empty slots) or tupledesc is mismatch");
+        }
+        for (int i = 0; i < this.numSlots; i++) {
+            if(isSlotUsed(i)) continue;
+            /**
+             * Tuple中的recordId也需要更改，因为里面记录了本tuple所在的pageid以及第几个tuple
+             */
+            t.setRecordId(new RecordId(this.pid,i));
+            tuples[i] = t;
+            markSlotUsed(i,true);
+            this.curTupleNum++;
+            //System.out.println(this.curTupleNum);
+            return;
+        }
     }
 
     /**
@@ -288,7 +326,12 @@ public class HeapPage implements Page {
      */
     public void markDirty(boolean dirty, TransactionId tid) {
         // some code goes here
-	// not necessary for lab1
+	    // not necessary for lab1
+        if(dirty){
+            this.dirtyTrans = tid;
+        }else{
+            this.dirtyTrans = null;
+        }
     }
 
     /**
@@ -297,7 +340,7 @@ public class HeapPage implements Page {
     public TransactionId isDirty() {
         // some code goes here
 	// Not necessary for lab1
-        return null;      
+        return this.dirtyTrans;
     }
 
     /**
@@ -305,12 +348,7 @@ public class HeapPage implements Page {
      */
     public int getNumEmptySlots() {
         // some code goes here
-        //待验证
-        int target = 0;
-        for (int i = 0; i < tuples.length; i++) {
-            if(tuples[i] == null) target++;
-        }
-        return target;
+        return this.numSlots - this.curTupleNum;
     }
 
     /**
@@ -321,10 +359,7 @@ public class HeapPage implements Page {
     public boolean isSlotUsed(int i) {
         // some code goes here
         //待验证
-        int index = i / 8;
-        int move = i % 8;
-        return ((this.header[index] >> move) & 1) == 1;
-        //return tuples[i] != null;
+        return (this.header[i / 8] & (1 << (i % 8))) != 0;
     }
 
     /**
@@ -333,6 +368,13 @@ public class HeapPage implements Page {
     private void markSlotUsed(int i, boolean value) {
         // some code goes here
         // not necessary for lab1
+        int index = i / 8;
+        int move = i % 8;
+        if(value){
+            this.header[index] |= (1 << move);
+        }else{
+            this.header[index] &= ~(1 << move);
+        }
     }
 
     /**
@@ -341,9 +383,13 @@ public class HeapPage implements Page {
      */
     public Iterator<Tuple> iterator() {
         // some code goes here
-        return Arrays.stream(tuples).filter((o1)->{
-            return o1 != null;
-        }).iterator();
+        ArrayList<Tuple> vaildTuples = new ArrayList<>();
+        for (int i = 0; i < this.numSlots; i++) {
+            if(this.isSlotUsed(i)){
+                vaildTuples.add(this.tuples[i]);
+            }
+        }
+        return vaildTuples.iterator();
     }
 
 }

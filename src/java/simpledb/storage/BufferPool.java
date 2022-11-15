@@ -3,22 +3,12 @@ package simpledb.storage;
 import simpledb.common.Database;
 import simpledb.common.Permissions;
 import simpledb.common.DbException;
-import simpledb.common.DeadlockException;
-import simpledb.index.BTreeHeaderPage;
 import simpledb.transaction.TransactionAbortedException;
 import simpledb.transaction.TransactionId;
 
 import java.io.*;
 
-import java.util.Deque;
-import java.util.HashMap;
-import java.util.LinkedList;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReadWriteLock;
-import java.util.concurrent.locks.ReentrantLock;
-import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.*;
 
 /**
  * BufferPool manages the reading and writing of pages into memory from
@@ -42,48 +32,36 @@ public class BufferPool {
     constructor instead. */
     public static final int DEFAULT_PAGES = 50;
 
-//    private static final class bufferPoolPage{
-//        private final TransactionId transactionId;
-//        private final PageId pageId;
-//        private final Permissions permissions;
-//
-//        public bufferPoolPage(TransactionId transactionId, PageId pageId, Permissions permissions) {
-//            this.transactionId = transactionId;
-//            this.pageId = pageId;
-//            this.permissions = permissions;
-//        }
-//
-//        /**
-//         * 重写equal 与 hashcode
-//         */
-//        @Override
-//        public int hashCode() {
-//            return transactionId.hashCode() + pageId.hashCode() + permissions.hashCode();
-//        }
-//
-//        @Override
-//        public boolean equals(Object o) {
-//            bufferPoolPage test = (bufferPoolPage) o;
-//            if(transactionId.equals(test.transactionId) &&
-//                    pageId.equals(test.pageId) &&
-//                    permissions.equals(test.permissions)
-//                ) return true;
-//            return false;
-//        }
-//    }
+    private class pageIdNode{
+        PageId key;
+        Page value;
+        pageIdNode pre;
+        pageIdNode next;
 
-    /**
-     *
-     * 维护一个空闲链表与忙碌双端队列，LRU算法进行淘汰
-     * 维护一个hashmap，对应好其中的关系 ,hashmap要加锁，防止多线程访问时候出问题
-     */
-    private volatile HashMap<PageId,Page> map = new HashMap<>();
-    //创建一个读写锁
-    ReadWriteLock readWriteLock = new ReentrantReadWriteLock();
+        public pageIdNode(){
+            this.pre = null;
+            this.next = null;
+        }
 
-    Deque<Page> busyDeque;
-    Deque<Page> freeDeque;
+        public pageIdNode(PageId pageId,Page page){
+            this.key = pageId;
+            this.value = page;
+            this.pre = null;
+            this.next = null;
+        }
+    }
+    private pageIdNode start;
+    private pageIdNode end;
+
+    private volatile Map<PageId,pageIdNode> pageIdToPageIdNode;
+
     private int realNumPage = DEFAULT_PAGES;
+
+    //private volatile Map<PageId,Page> pageIdToPage;
+
+    private volatile Map<TransactionId,Set<PageId>> transactionIdToPageIdSet;
+
+
     /**
      * Creates a BufferPool that caches up to numPages pages.
      *
@@ -91,15 +69,42 @@ public class BufferPool {
      */
     public BufferPool(int numPages) {
         // some code goes here
-        busyDeque = new LinkedList<>();
-        freeDeque = new LinkedList<>();
+        transactionIdToPageIdSet = new HashMap<>();
         this.realNumPage = numPages;
+
         /**
-         * 初始化对应数量的页加入freeDeque
-         * 
+         * 初始化lru链表
          */
+        this.start = new pageIdNode();
+        this.end = new pageIdNode();
+        this.start.next = end;
+        this.end.pre = start;
+        pageIdToPageIdNode = new HashMap<>();
+
     }
-    
+
+    public void deleteNode(pageIdNode node){
+        node.pre.next = node.next;
+        node.next.pre = node.pre;
+        node.next = null;
+        node.pre = null;
+    }
+
+    public void addToStart(pageIdNode node){
+        node.next = start.next;
+        node.next.pre = node;
+        node.pre = start;
+        start.next = node;
+    }
+
+    public void moveToStart(pageIdNode node){
+        deleteNode(node);
+        addToStart(node);
+    }
+
+
+
+
     public static int getPageSize() {
       return pageSize;
     }
@@ -132,63 +137,28 @@ public class BufferPool {
     public Page getPage(TransactionId tid, PageId pid, Permissions perm)
         throws TransactionAbortedException, DbException {
         // some code goes here
-        readWriteLock.readLock().lock();
-        try {
-            if(map.containsKey(pid)){
-                return map.get(pid);
-            }
-        }catch(Exception e){
-            throw new TransactionAbortedException();
-        }
-        finally {
-            readWriteLock.readLock().unlock();
-        }
-        // 11 - 8  如果没有去catalog中拿dbfile
-        DbFile dbFile = Database.getCatalog().getDatabaseFile(pid.getTableId());
-        Page page =  dbFile.readPage(pid);
+        Set<PageId> pids = transactionIdToPageIdSet.getOrDefault(tid,new HashSet<>());
+        pids.add(pid);
+        transactionIdToPageIdSet.put(tid,pids);
 
-        /**
-         * 没有的桦需要创建和插入
-         */
-        if(busyDeque.size() < realNumPage){
-            busyDeque.addFirst(page);
-            //写入map
-            readWriteLock.writeLock().lock();
-            try {
-                map.put(pid,page);
-                return page;
-            }catch(Exception e){
-                throw new TransactionAbortedException();
-            }
-            finally {
-                readWriteLock.writeLock().unlock();
-            }
+        if(pageIdToPageIdNode.containsKey(pid)){
+            Page page  = pageIdToPageIdNode.get(pid).value;
+            moveToStart(pageIdToPageIdNode.get(pid));
+            return page;
         }
 
-        /**
-         * 否则的需要删除掉尾部节点，再进行插入
-         */
-        //写入map
-        readWriteLock.writeLock().lock();
-        try {
-            //寻找要删除掉的key
-            for(Map.Entry<PageId,Page> entry : map.entrySet()){
-                if(entry.getValue().equals(page)){
-                    map.remove(entry.getKey());
-                    break;
-                }
-            }
-            //加入到map中
-            map.put(pid,page);
-        }catch(Exception e){
-            throw new TransactionAbortedException();
+        if(pageIdToPageIdNode.size() >= this.realNumPage){
+            //每次移除队尾页面
+            evictPage();
         }
-        finally {
-            readWriteLock.writeLock().unlock();
-        }
-        busyDeque.removeLast();
-        busyDeque.addFirst(page);
-        return page;
+
+        Page newPage = Database.getCatalog().getDatabaseFile(pid.getTableId()).readPage(pid);
+        pageIdNode newNode = new pageIdNode(pid,newPage);
+        pageIdToPageIdNode.put(pid,newNode);
+        //添加新页面，直接add
+        addToStart(newNode);
+
+        return newPage;
     }
 
     /**
@@ -252,9 +222,15 @@ public class BufferPool {
     public void insertTuple(TransactionId tid, int tableId, Tuple t)
         throws DbException, IOException, TransactionAbortedException {
         // some code goes here
-        PageId pageId = t.getRecordId().getPageId();
-
         // not necessary for lab1
+        DbFile dbFile = Database.getCatalog().getDatabaseFile(tableId);
+        List<Page> dirtiedPages = dbFile.insertTuple(tid,t);
+        if(dirtiedPages == null) return;
+        for (Page dirtiedPage : dirtiedPages){
+            //访问过，则移动
+            moveToStart(pageIdToPageIdNode.get(dirtiedPage.getId()));
+            dirtiedPage.markDirty(true,tid);
+        }
     }
 
     /**
@@ -270,10 +246,19 @@ public class BufferPool {
      * @param tid the transaction deleting the tuple.
      * @param t the tuple to delete
      */
-    public  void deleteTuple(TransactionId tid, Tuple t)
+    public void deleteTuple(TransactionId tid, Tuple t)
         throws DbException, IOException, TransactionAbortedException {
         // some code goes here
         // not necessary for lab1
+        int tableId =  t.getRecordId().getPageId().getTableId();
+        DbFile dbFile = Database.getCatalog().getDatabaseFile(tableId);
+        List<Page> dirtiedPages = dbFile.deleteTuple(tid,t);
+
+        for (Page dirtiedPage : dirtiedPages){
+            //访问过 则移动
+            moveToStart(pageIdToPageIdNode.get(dirtiedPage.getId()));
+            dirtiedPage.markDirty(true,tid);
+        }
     }
 
     /**
@@ -284,7 +269,9 @@ public class BufferPool {
     public synchronized void flushAllPages() throws IOException {
         // some code goes here
         // not necessary for lab1
-
+        for(PageId pageId : this.pageIdToPageIdNode.keySet()){
+            flushPage(pageId);
+        }
     }
 
     /** Remove the specific page id from the buffer pool.
@@ -298,6 +285,7 @@ public class BufferPool {
     public synchronized void discardPage(PageId pid) {
         // some code goes here
         // not necessary for lab1
+        this.pageIdToPageIdNode.remove(pid);
     }
 
     /**
@@ -307,6 +295,14 @@ public class BufferPool {
     private synchronized  void flushPage(PageId pid) throws IOException {
         // some code goes here
         // not necessary for lab1
+        Page page = this.pageIdToPageIdNode.get(pid).value;
+        if(page != null && page.isDirty() != null){
+            //如果该页不为空并且该页是脏的
+            //应当调用对应文件的write方法来写进去新的page
+            DbFile heapFile =  Database.getCatalog().getDatabaseFile(pid.getTableId());
+            heapFile.writePage(page);
+            page.markDirty(false,null);
+        }
     }
 
     /** Write all pages of the specified transaction to disk.
@@ -314,6 +310,14 @@ public class BufferPool {
     public synchronized  void flushPages(TransactionId tid) throws IOException {
         // some code goes here
         // not necessary for lab1|lab2
+        Set<PageId> pageIds = this.transactionIdToPageIdSet.get(tid);
+        if(pageIds.size() == 0){
+            //说明该事务在缓冲池中没有放页码
+            return;
+        }
+        for(PageId pageId : pageIds){
+            flushPage(pageId);
+        }
     }
 
     /**
@@ -323,6 +327,51 @@ public class BufferPool {
     private synchronized  void evictPage() throws DbException {
         // some code goes here
         // not necessary for lab1
+//        boolean flag = false;
+//        for(Page page : this.pageIdToPage.values()){
+//            if(page.isDirty() != null){
+//                //如果该页面是脏的，优先保留
+//                continue;
+//            }
+//            //如果不脏
+//            try {
+//                this.flushPage(page.getId());
+//            } catch (IOException e) {
+//                e.printStackTrace();
+//            }
+//
+//            flag = true;
+//            discardPage(page.getId());
+//            break;
+//        }
+//
+//        if(!flag){
+//            //说明页面全部都是脏的，这时候需要寻找一个强制刷页
+//            //这里选择随机选择一个事务，刷页
+//            for(TransactionId transactionId : this.transactionIdToPageIdSet.keySet()){
+//                if(this.transactionIdToPageIdSet.get(transactionId).size() > 0){
+//                    //如果该事务的pageset不为空，刷页！！
+//                    try {
+//                        flushPages(transactionId);
+//                        evictPage();  //再去尝试丢弃页
+//                    } catch (IOException e) {
+//                        e.printStackTrace();
+//                    }
+//                }
+//            }
+//        }
+
+        //移除掉最后一页
+        pageIdNode pageIdNode = end.pre;
+        Page page = pageIdNode.value;
+        if(page.isDirty() != null){
+            try {
+                this.flushPage(page.getId());
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+        discardPage(page.getId());
     }
 
 }

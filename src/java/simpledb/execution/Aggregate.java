@@ -68,7 +68,8 @@ public class Aggregate extends Operator {
             /**
              * 用IntegerAggregator处理
              */
-            IntegerAggregator integerAggregator = new IntegerAggregator(this.gfield,this.opIerator.getTupleDesc().getFieldType(gfield),this.afiled,this.aop);
+            Type groupFieldType = this.gfield == -1 ? null : this.opIerator.getTupleDesc().getFieldType(gfield);
+            IntegerAggregator integerAggregator = new IntegerAggregator(this.gfield,groupFieldType,this.afiled,this.aop);
             try {
                 tempOp.open();
                 while (tempOp.hasNext()){

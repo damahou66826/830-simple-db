@@ -88,7 +88,7 @@ public class TupleDesc implements Serializable {
         // some code goes here
         tdItems = new ArrayList<>(typeAr.length);
         for (int i = 0; i < typeAr.length; i++) {
-            tdItems.add(new TDItem(typeAr[i],"column"+ i));
+            tdItems.add(new TDItem(typeAr[i],"__unname__"));
         }
     }
 
@@ -178,34 +178,30 @@ public class TupleDesc implements Serializable {
      */
     public static TupleDesc merge(TupleDesc td1, TupleDesc td2) {
         // some code goes here
-        int size = td1.tdItems.size() + td2.tdItems.size();
-        Type[] newType = new Type[size];
-        String[] newString = new String[size];
-        int index = 0;
-        List<String> judgeName = new ArrayList<>();
-        boolean flag = true;
-        for(TDItem tdItem : td1.tdItems){
-            newType[index] = tdItem.fieldType;
-            newString[index] = tdItem.fieldName;
-            if(flag && judgeName.contains(tdItem.fieldName)) flag = false;
-            else if(flag){
-                judgeName.add(tdItem.fieldName);
-            }
-            index++;
-        }
-        for(TDItem tdItem : td2.tdItems){
-            newType[index] = tdItem.fieldType;
-            newString[index] = tdItem.fieldName;
-            if(flag && judgeName.contains(tdItem.fieldName)) flag = false;
-            else if(flag){
-                judgeName.add(tdItem.fieldName);
-            }
-            index++;
-        }
-        //判断是否有重复列名，如果有重复，则改为默认列名设置
-        if(flag) return new TupleDesc(newType,newString);
-        else return new TupleDesc(newType);
+        ArrayList<Type> types = new ArrayList<>();
+        ArrayList<String> names = new ArrayList<>();
 
+        Iterator<TDItem> iter1 = td1.iterator();
+        while(iter1.hasNext()) {
+            TDItem item = iter1.next();
+            types.add(item.fieldType);
+            names.add(item.fieldName);
+        }
+
+        Iterator<TDItem> iter2 = td2.iterator();
+        while(iter2.hasNext()) {
+            TDItem item = iter2.next();
+            types.add(item.fieldType);
+            names.add(item.fieldName);
+        }
+
+        Type[] ta = new Type[types.size()];
+        ta = types.toArray(ta);
+
+        String[] fa =  new String[names.size()];
+        fa = names.toArray(fa);
+
+        return new TupleDesc(ta, fa);
     }
 
     /**
