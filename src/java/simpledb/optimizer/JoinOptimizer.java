@@ -3,6 +3,7 @@ package simpledb.optimizer;
 import simpledb.common.Database;
 import simpledb.ParsingException;
 import simpledb.execution.*;
+import simpledb.storage.DbFile;
 import simpledb.storage.TupleDesc;
 
 import java.util.*;
@@ -130,7 +131,12 @@ public class JoinOptimizer {
             // HINT: You may need to use the variable "j" if you implemented
             // a join algorithm that's more complicated than a basic
             // nested-loops join.
-            return -1.0;
+            int leftFileId = Database.getCatalog().getTableId(j.t1Alias);
+            int rightFileId = Database.getCatalog().getTableId(j.t2Alias);
+            DbFile leftFile = Database.getCatalog().getDatabaseFile(leftFileId);
+            DbFile rightFile = Database.getCatalog().getDatabaseFile(rightFileId);
+
+            return cost1 + card1 * cost2 + card1 * card2;
         }
     }
 
@@ -176,6 +182,27 @@ public class JoinOptimizer {
                                                    Map<String, Integer> tableAliasToId) {
         int card = 1;
         // some code goes here
+        //如果是等价连接
+        if(joinOp.equals(Predicate.Op.EQUALS)){
+            if(!t1pkey && !t2pkey){
+                card = Math.max(card1,card2);
+            }else{
+                if(t1pkey){
+                    if(t2pkey){
+                        card = Math.min(card1,card2);
+                    }else{
+                        card = card1;
+                    }
+                }else{
+                    card = card2;
+                }
+            }
+        }else{
+            //不是等值查询直接返回文档中所说的
+            card = (int) (card1 * card2 * 0.3);
+        }
+
+
         return card <= 0 ? 1 : card;
     }
 
@@ -238,7 +265,48 @@ public class JoinOptimizer {
 
         // some code goes here
         //Replace the following
-        return joins;
+
+        PlanCache planCache = new PlanCache();
+
+        /**
+         * 1. j = set of join nodes
+         * 2. for (i in 1...|j|):
+         * 3.     for s in {all length i subsets of j}
+         * 4.       bestPlan = {}
+         * 5.       for s' in {all length d-1 subsets of s}
+         * 6.            subplan = optjoin(s')
+         * 7.            plan = best way to join (s-s') to subplan
+         * 8.            if (cost(plan) < cost(bestPlan))
+         * 9.               bestPlan = plan
+         * 10.      optjoin(s) = bestPlan
+         * 11. return optjoin(j)
+         */
+
+        for (int i = 1; i <= this.joins.size(); i++) {
+            for (Set<LogicalJoinNode> subSet : enumerateSubsets(this.joins,i)){
+                CostCard bestPlan = new CostCard();
+                bestPlan.cost = Double.MAX_VALUE;
+                for (LogicalJoinNode l : subSet){
+                    CostCard tempCostCard = this.computeCostAndCardOfSubplan(
+                            stats,
+                            filterSelectivities,
+                            l,
+                            subSet,
+                            bestPlan.cost,
+                            planCache);
+
+                    if(tempCostCard != null) bestPlan = tempCostCard;
+
+                }
+                planCache.addPlan(subSet,bestPlan.cost,bestPlan.card,bestPlan.plan);
+            }
+        }
+        List<LogicalJoinNode> optOrder = planCache.getOrder(new HashSet<>(joins));
+
+        if(explain){
+            printJoins(optOrder,planCache,stats,filterSelectivities);
+        }
+        return optOrder;
     }
 
     // ===================== Private Methods =================================
