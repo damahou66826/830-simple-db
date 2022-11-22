@@ -37,8 +37,8 @@ public class Catalog {
         }
     }
 
-    private HashMap<Integer,Table> tableMap;
-    private HashMap<String,Table> stringAboutTable;
+    private Map<Integer,Table> tableMap;
+    private Map<String,Table> stringAboutTable;
 
 
     /**
@@ -47,8 +47,8 @@ public class Catalog {
      */
     public Catalog() {
         // some code goes here
-        tableMap = new HashMap<>();
-        stringAboutTable = new HashMap<>();
+        tableMap = new ConcurrentHashMap<>();
+        stringAboutTable = new ConcurrentHashMap<>();
     }
 
     /**

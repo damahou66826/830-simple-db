@@ -235,18 +235,17 @@ public class HeapFile implements DbFile {
         for (int i = 0; i < this.pageNum; i++) {
             HeapPage tempPage = (HeapPage) Database.getBufferPool().getPage(tid,new HeapPageId(this.getId(),i),Permissions.READ_ONLY);
             //满了就下一个
-            if(tempPage.getNumEmptySlots() == 0) continue;
+            if(tempPage.getNumEmptySlots() == 0){
+                Database.getBufferPool().unsafeReleasePage(tid, tempPage.pid);
+                continue;
+            }
+            tempPage = (HeapPage) Database.getBufferPool().getPage(tid,new HeapPageId(this.getId(),i),Permissions.READ_WRITE);
             tempPage.insertTuple(t);
             lst.add(tempPage);
+            return lst;
         }
         if(lst.size() == 0){
             //说明页满了，增加一个新的页码
-            //HeapPage newPage = new HeapPage(new HeapPageId(this.getId(),this.pageNum),new byte[BufferPool.getPageSize()]);
-//            writePage(newPage);
-//            // newPage.insertTuple(t); =====> newPage已经不是该文件里那个位置了，因为他作为字节流被写入到this.f中了
-//            HeapPage targetPage = (HeapPage) Database.getBufferPool().getPage(tid,new HeapPageId(this.getId(),this.pageNum - 1),Permissions.READ_ONLY);
-//            targetPage.insertTuple(t);
-//            lst.add(newPage);
             PageId pageId = new HeapPageId(this.getId(),this.pageNum);
             HeapPage heapPage = (HeapPage) Database.getBufferPool().getPage(tid,pageId,Permissions.READ_WRITE);
             heapPage.insertTuple(t);
@@ -262,9 +261,9 @@ public class HeapFile implements DbFile {
         // not necessary for lab1
         //首先找到要删除Tuple的所在页面
         PageId pageId = t.getRecordId().getPageId();
-        HeapPage heapPage = (HeapPage) Database.getBufferPool().getPage(tid,pageId,Permissions.READ_ONLY);
+        HeapPage heapPage = (HeapPage) Database.getBufferPool().getPage(tid,pageId,Permissions.READ_WRITE);
         heapPage.deleteTuple(t);
-        return new ArrayList<Page>(Arrays.asList(heapPage));
+        return new ArrayList<Page>(Collections.singletonList(heapPage));
     }
 
     // see DbFile.java for javadocs

@@ -30,8 +30,8 @@ public class BTreeHeaderPage implements Page {
 	final byte[] header;
 	final int numSlots;
 
-	private int nextPage; // next header page or 0
-	private int prevPage; // previous header page or 0
+	private int nextPage; // next header page or 0        //如果为0说明没有下一个页面
+	private int prevPage; // previous header page or 0    //如果为0 说明没有前一个页面
 
 	byte[] oldData;
 	private final Byte oldDataLock= (byte) 0;
@@ -50,6 +50,7 @@ public class BTreeHeaderPage implements Page {
 		DataInputStream dis = new DataInputStream(new ByteArrayInputStream(data));
 
 		// Read the next and prev pointers
+		// dis的前两个int大小的位置代表着两个指针
 		try {
 			Field f = Type.INT_TYPE.parse(dis);
 			this.nextPage = ((IntField) f).getValue();
@@ -146,6 +147,9 @@ public class BTreeHeaderPage implements Page {
 		DataOutputStream dos = new DataOutputStream(baos);
 
 		// write out the next and prev pointers
+		/**
+		 * 先加两个指针
+		 */
 		try {
 			dos.writeInt(nextPage);
 
@@ -160,6 +164,9 @@ public class BTreeHeaderPage implements Page {
 		}
 
 		// create the header of the page
+		/**
+		 * 再加上页数据
+		 */
         for (byte b : header) {
             try {
                 dos.writeByte(b);

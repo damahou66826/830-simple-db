@@ -25,7 +25,7 @@ import simpledb.storage.RecordId;
 public class BTreeInternalPage extends BTreePage {
 	private final byte[] header;
 	private final Field[] keys;
-	private final int[] children;
+	private final int[] children;  //孩子们分别在这个BTreeFile里面的第几页
 	private final int numSlots;
 	
 	private int childCategory; // either leaf or internal
@@ -83,7 +83,7 @@ public class BTreeInternalPage extends BTreePage {
 			e.printStackTrace();
 		}
 
-		// read the child page category
+		// read the child page category ================》  孩子页面目录
 		childCategory = dis.readByte();
 
 		// allocate and read the header slots of this page
@@ -347,6 +347,7 @@ public class BTreeInternalPage extends BTreePage {
 	 * @param e The entry to delete
 	 * @param deleteRightChild - if true, delete the right child. Otherwise
 	 *        delete the left child
+	 *                         （看不太懂）
 	 */
 	private void deleteEntry(BTreeEntry e, boolean deleteRightChild) throws DbException {
 		RecordId rid = e.getRecordId();
