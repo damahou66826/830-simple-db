@@ -5,6 +5,7 @@ import simpledb.common.Database;
 import simpledb.transaction.TransactionId;
 import simpledb.common.Debug;
 
+import javax.xml.crypto.Data;
 import java.io.*;
 import java.util.*;
 import java.lang.reflect.*;
@@ -95,6 +96,7 @@ public class LogFile {
 
     final Map<Long,Long> tidToFirstLogRecord = new HashMap<>();
 
+
     /** Constructor.
         Initialize and back the log file with the specified file.
         We're not sure yet whether the caller is creating a brand new DB,
@@ -140,7 +142,7 @@ public class LogFile {
     public synchronized int getTotalRecords() {
         return totalRecords;
     }
-    
+
     /** Write an abort record to the log for the specified tid, force
         the log to disk, and perform a rollback
         @param tid The aborting transaction.
@@ -211,7 +213,6 @@ public class LogFile {
         */
         raf.writeInt(UPDATE_RECORD);
         raf.writeLong(tid.getId());
-
         writePageData(raf,before);
         writePageData(raf,after);
         raf.writeLong(currentOffset);
@@ -346,7 +347,6 @@ public class LogFile {
                 //Debug.log("CP OFFSET = " + currentOffset);
             }
         }
-
         logTruncate();
     }
 
@@ -460,9 +460,69 @@ public class LogFile {
             synchronized(this) {
                 preAppend();
                 // some code goes here
+                /**
+                 * 开启写日志
+                 */
+                final Long firstRecordPos = this.tidToFirstLogRecord.get(tid.getId());
+                this.raf.seek(firstRecordPos);
+                while (true) {
+                    try {
+                        final int type = raf.readInt();
+                        final long transactionId = raf.readLong();
+                        switch (type) {
+                            case UPDATE_RECORD: {
+                                final Page beginPage = readPageData(this.raf);
+                                readPageData(this.raf);
+                                final PageId pageId = beginPage.getId();
+                                if (transactionId == tid.getId()) {
+                                    // resetBeforePage will reset page if page in BufferPool
+                                    Database.getBufferPool().discardPage(pageId);
+                                    Database.getCatalog().getDatabaseFile(pageId.getTableId()).writePage(beginPage);
+                                }
+                                break;
+                            }
+                            case CHECKPOINT_RECORD: {
+                                skipCheckPointRecord();
+                                break;
+                            }
+                        }
+                        if(type == ABORT_RECORD && transactionId == tid.getId()) break;
+                        raf.readLong();
+                    } catch (final EOFException e) {
+                        break;
+                    }
+                }
             }
         }
     }
+
+
+    /**
+     * 在日志中遇到checkPoint的时候进行跳过.
+     * @throws IOException
+     */
+    private void skipCheckPointRecord() throws  IOException{
+        int count = raf.readInt();
+        Map<Long,Long> rtn = new HashMap<>();
+        while(count-- != 0){
+            long tid = raf.readLong();
+            long firstRecordOffset = raf.readLong();
+            rtn.put(tid, firstRecordOffset);
+        }
+    }
+
+    private Map<Long, Long> readCheckPoint(RandomAccessFile raf) throws IOException {
+        int count = raf.readInt();
+        Map<Long, Long> rtn = new HashMap<>();
+        while(count-- != 0) {
+            long tid = raf.readLong();
+            long firstRecordOffset = raf.readLong();
+            rtn.put(tid, firstRecordOffset);
+        }
+        return rtn;
+    }
+
+
 
     /** Shutdown the logging system, writing out whatever state
         is necessary so that start up can happen quickly (without
@@ -487,6 +547,60 @@ public class LogFile {
             synchronized (this) {
                 recoveryUndecided = false;
                 // some code goes here
+                this.raf.seek(0);
+                final HashSet<Long> commitIds = new HashSet<>();
+                final HashMap<Long, List<Page>> beforePages = new HashMap<>();
+                final HashMap<Long, List<Page>> afterPages = new HashMap<>();
+                while (true) {
+                    try {
+                        final int type = this.raf.readInt();
+                        final long tid = this.raf.readLong();
+                        switch (type) {
+                            case UPDATE_RECORD: {
+                                final Page beforePage = readPageData(raf);
+                                final Page afterPage = readPageData(raf);
+
+                                final List<Page> beforeList = beforePages.getOrDefault(tid, new ArrayList<>());
+                                beforeList.add(beforePage);
+
+                                final List<Page> afterList = afterPages.getOrDefault(tid, new ArrayList<>());
+                                afterList.add(afterPage);
+                                break;
+                            }
+                            case COMMIT_RECORD: {
+                                commitIds.add(tid);
+                                break;
+                            }
+                            case CHECKPOINT_RECORD: {
+                                skipCheckPointRecord();
+                                break;
+                            }
+                        }
+                    } catch (final EOFException e) {
+                        break;
+                    }
+                }
+                // Roll back unCommitted txn
+                beforePages.forEach((tid, pages) -> {
+                    if (!commitIds.contains(tid)) {
+                        for (final Page page : pages) {
+                            try {
+                                Database.getCatalog().getDatabaseFile(page.getId().getTableId()).writePage(page);
+                            } catch (IOException e) {
+                                e.printStackTrace();
+                            }
+                        }
+                    }
+                });
+                // Write commit pages
+                for (final Long commitId : commitIds) {
+                    if (afterPages.containsKey(commitId)) {
+                        final List<Page> pages = afterPages.get(commitId);
+                        for (final Page page : pages) {
+                            Database.getCatalog().getDatabaseFile(page.getId().getTableId()).writePage(page);
+                        }
+                    }
+                }
             }
          }
     }

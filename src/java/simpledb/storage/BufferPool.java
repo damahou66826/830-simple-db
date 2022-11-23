@@ -22,7 +22,7 @@ import java.util.concurrent.locks.*;
  * The BufferPool is also responsible for locking;  when a transaction fetches
  * a page, BufferPool checks that the transaction has the appropriate
  * locks to read/write the page.
- * 
+ *
  * @Threadsafe, all fields are final
  */
 public class BufferPool {
@@ -30,7 +30,7 @@ public class BufferPool {
     private static final int DEFAULT_PAGE_SIZE = 4096;
 
     private static int pageSize = DEFAULT_PAGE_SIZE;
-    
+
     /** Default number of pages passed to the constructor. This is used by
     other classes. BufferPool should use the numPages argument to the
     constructor instead. */
@@ -56,7 +56,17 @@ public class BufferPool {
             this.pre = null;
             this.next = null;
         }
+
+        public boolean equal(pageIdNode newNode){
+            return newNode.key.equals(this.key) && newNode.value.equals(this.value);
+        }
+
+        public int hashcode(){
+            return this.key.hashCode() + this.value.hashCode();
+        }
+
     }
+
     private final pageIdNode start;
     private final pageIdNode end;
 
@@ -115,12 +125,12 @@ public class BufferPool {
     public static int getPageSize() {
       return pageSize;
     }
-    
+
     // THIS FUNCTION SHOULD ONLY BE USED FOR TESTING!!
     public static void setPageSize(int pageSize) {
     	BufferPool.pageSize = pageSize;
     }
-    
+
     // THIS FUNCTION SHOULD ONLY BE USED FOR TESTING!!
     public static void resetPageSize() {
     	BufferPool.pageSize = DEFAULT_PAGE_SIZE;
@@ -242,7 +252,7 @@ public class BufferPool {
                  * 对tid涉及的页进行flushPage操作
                  *
                  */
-                flushPages(tid);
+                flushPages(tid,true);
             }else{
                 /**
                  * 对页码进行回滚操作
@@ -272,14 +282,14 @@ public class BufferPool {
 
     /**
      * Add a tuple to the specified table on behalf of transaction tid.  Will
-     * acquire a write lock on the page the tuple is added to and any other 
-     * pages that are updated (Lock acquisition is not needed for lab2). 
+     * acquire a write lock on the page the tuple is added to and any other
+     * pages that are updated (Lock acquisition is not needed for lab2).
      * May block if the lock(s) cannot be acquired.
-     * 
+     *
      * Marks any pages that were dirtied by the operation as dirty by calling
-     * their markDirty bit, and adds versions of any pages that have 
-     * been dirtied to the cache (replacing any existing versions of those pages) so 
-     * that future requests see up-to-date pages. 
+     * their markDirty bit, and adds versions of any pages that have
+     * been dirtied to the cache (replacing any existing versions of those pages) so
+     * that future requests see up-to-date pages.
      *
      * @param tid the transaction adding the tuple
      * @param tableId the table to add the tuple to
@@ -305,9 +315,9 @@ public class BufferPool {
      * other pages that are updated. May block if the lock(s) cannot be acquired.
      *
      * Marks any pages that were dirtied by the operation as dirty by calling
-     * their markDirty bit, and adds versions of any pages that have 
-     * been dirtied to the cache (replacing any existing versions of those pages) so 
-     * that future requests see up-to-date pages. 
+     * their markDirty bit, and adds versions of any pages that have
+     * been dirtied to the cache (replacing any existing versions of those pages) so
+     * that future requests see up-to-date pages.
      *
      * @param tid the transaction deleting the tuple.
      * @param t the tuple to delete
@@ -343,7 +353,7 @@ public class BufferPool {
         Needed by the recovery manager to ensure that the
         buffer pool doesn't keep a rolled back page in its
         cache.
-        
+
         Also used by B+ tree files to ensure that deleted pages
         are removed from the cache so they can be reused safely
     */
@@ -355,26 +365,46 @@ public class BufferPool {
         this.pageIdToPageIdNode.remove(pid);
     }
 
+    private synchronized  void flushPage(PageId pid) throws IOException {
+        flushPage(pid,false);
+    }
+
+
     /**
      * Flushes a certain page to disk
      * @param pid an ID indicating the page to flush
      */
-    private synchronized  void flushPage(PageId pid) throws IOException {
+    private synchronized  void flushPage(PageId pid,boolean needSetBeforeImage) throws IOException {
         // some code goes here
         // not necessary for lab1
         Page page = this.pageIdToPageIdNode.get(pid).value;
-        if(page != null && page.isDirty() != null){
+        // append an update record to the log, with
+        // a before-image and after-image.
+        if(page == null) return;
+        TransactionId dirtier = page.isDirty();
+        if (dirtier != null){
+            Database.getLogFile().logWrite(dirtier, page.getBeforeImage(), page);
+            Database.getLogFile().force();
             //如果该页不为空并且该页是脏的
             //应当调用对应文件的write方法来写进去新的page
             DbFile heapFile =  Database.getCatalog().getDatabaseFile(pid.getTableId());
             heapFile.writePage(page);
             page.markDirty(false,null);
+
+            //刷页之后setBeforeImage
+            if(needSetBeforeImage)
+                page.setBeforeImage();
         }
     }
 
+    public synchronized  void flushPages(TransactionId tid) throws IOException {
+        flushPages(tid,false);
+    }
+
+
     /** Write all pages of the specified transaction to disk.
      */
-    public synchronized  void flushPages(TransactionId tid) throws IOException {
+    public synchronized  void flushPages(TransactionId tid,boolean needSetBeforeImage) throws IOException {
         // some code goes here
         // not necessary for lab1|lab2
         Set<PageId> pageIds = this.transactionIdToPageIdSet.get(tid);
@@ -383,7 +413,7 @@ public class BufferPool {
             return;
         }
         for(PageId pageId : pageIds){
-            flushPage(pageId);
+            flushPage(pageId,needSetBeforeImage);
         }
     }
 
